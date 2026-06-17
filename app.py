@@ -25,25 +25,30 @@ DEFAULT_CSV_PATH = "pills.csv"
 DEFAULT_PKL_PATH = "processed_db.pkl"
 
 # ----------------------------------------------------
-# [구글 드라이브 대용량 파일 자동 다운로드 로직]
+# [구글 드라이브 대용량 파일 자동 다운로드 로직] - 구글 보안 우회 차단 패치 버전
 # ----------------------------------------------------
 @st.cache_resource
 def download_large_db_files():
-    # 1. pills.csv 다운로드 (약 40MB 내외 대용량 대비)
+    # 1. pills.csv 다운로드
     if not os.path.exists(DEFAULT_CSV_PATH):
         with st.spinner("📦 초기에 필요한 알약 데이터베이스(pills.csv)를 안전하게 다운로드 중입니다... (약 10~20초 소요)"):
-            csv_id = "1fM2H1Xdp6w-07TE3FcPfV3d2_lcyK-DH"
-            csv_url = f"https://drive.google.com/uc?id={csv_id}"
-            gdown.download(csv_url, DEFAULT_CSV_PATH, quiet=True)
+            csv_url = "https://docs.google.com/uc?export=download&id=1fM2H1Xdp6w-07TE3FcPfV3d2_lcyK-DH"
+            try:
+                gdown.download(csv_url, DEFAULT_CSV_PATH, quiet=True, use_cookies=False)
+            except Exception:
+                # 일반 다운로드 실패 시 2차 대체 주소로 다운로드 시도
+                gdown.download(f"https://drive.google.com/uc?id=1fM2H1Xdp6w-07TE3FcPfV3d2_lcyK-DH", DEFAULT_CSV_PATH, quiet=True)
             
     # 2. processed_db.pkl 다운로드
     if not os.path.exists(DEFAULT_PKL_PATH):
         with st.spinner("🛡️ 국가 병용금기 데이터베이스(processed_db.pkl)를 안전하게 다운로드 중입니다..."):
-            pkl_id = "1i26f4a9f5P-HI6yFZMTvaxSpoPoy8WLw"
-            pkl_url = f"https://drive.google.com/uc?id={pkl_id}"
-            gdown.download(pkl_url, DEFAULT_PKL_PATH, quiet=True)
+            pkl_url = "https://docs.google.com/uc?export=download&id=1i26f4a9f5P-HI6yFZMTvaxSpoPoy8WLw"
+            try:
+                gdown.download(pkl_url, DEFAULT_PKL_PATH, quiet=True, use_cookies=False)
+            except Exception:
+                gdown.download(f"https://drive.google.com/uc?id=1i26f4a9f5P-HI6yFZMTvaxSpoPoy8WLw", DEFAULT_PKL_PATH, quiet=True)
 
-# 인터넷 상에 배포되었을 때 실행할 파일 다운로드 구동
+# 인터넷 클라우드 서버 구동 시 즉시 백그라운드 다운로드 실행
 download_large_db_files()
 
 
@@ -368,7 +373,7 @@ if selected_page == "💊 1페이지: 약물 병용금기 검색":
         st.subheader("바닥에 있는 약 스캔하기")
         
         if df_db is None:
-            st.error("❌ 데이터베이스 로드 실패 상태입니다.")
+            st.error("❌ 데이터베이스 파일 로드 실패 상태입니다.")
         else:
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
