@@ -4,17 +4,17 @@ import sys
 import argparse
 import difflib
 import time
-import gc  # 💡 메모리 확보를 위한 가비지 컬렉터 추가
+import gc  # 💡 조원 코드를 살리기 위한 메모리 구원투수
 from pathlib import Path
 from PIL import ImageFont, ImageDraw, Image
 
 import numpy as np
 import pandas as pd
 import cv2
-import torch
+import torch  # 💡 조원님의 EasyOCR 구동을 위해 유지
 import easyocr
 import streamlit as st
-import requests  # 대용량 파일 분할 다운로드용 라이브러리
+import requests
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import google.generativeai as genai
@@ -28,7 +28,7 @@ st.set_page_config(page_title="스마트 의약품 안전 조회 시스템", pag
 HUGGINGFACE_DUR_URL = "https://huggingface.co/datasets/jingjing52/dur-db/resolve/main/processed_db.pkl"
 
 # ----------------------------------------------------
-# [텍스트 및 데이터 내부 정규화 함수]
+# [텍스트 및 데이터 내부 정규화 함수 - 조원님 원본 코드 복구]
 # ----------------------------------------------------
 def norm_text(s: str) -> str:
     s = str(s).upper().strip()
@@ -43,7 +43,7 @@ def read_csv_safe(path: str) -> pd.DataFrame:
     raise RuntimeError(f"CSV를 읽을 수 없습니다: {path}")
 
 # ----------------------------------------------------
-# [알약 이미지 검색 엔진 구축 빌더 - 메모리 다이어트 버전]
+# [알약 이미지 검색 엔진 구축 빌더 - 조원님 EasyOCR 로직 유지]
 # ----------------------------------------------------
 @st.cache_resource
 def load_pill_engines():
@@ -59,7 +59,7 @@ def load_pill_engines():
             df1 = read_csv_safe(part1)
             df2 = read_csv_safe(part2)
             df = pd.concat([df1, df2], ignore_index=True).fillna("")
-            del df1, df2  # 💡 사용 연산 끝난 결합 데이터 즉시 메모리 파괴
+            del df1, df2
             gc.collect()
     else:
         st.error("❌ 저장소 내부에 pills.csv 또는 분할된 csv 파일들이 존재하지 않습니다.")
@@ -75,11 +75,11 @@ def load_pill_engines():
     ) if imprint_cols else ""
     df["imprint_text_nospace"] = df["imprint_text"].str.replace(" ", "", regex=False)
 
-    vec = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4), min_df=2) # 💡 빈도수 1짜리 단어 제거해서 차원 축소 및 용량 최적화
-    mat = vec.fit_transform(df["search_text"].tolist()).astype(np.float32) # 💡 float64에서 float32로 변환하여 메모리 반토막 절약
+    vec = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4), min_df=2)
+    mat = vec.fit_transform(df["search_text"].tolist()).astype(np.float32)
     
-    # EasyOCR CPU 고정 모드로 변환하여 불필요한 PyTorch CUDA 메모리 점유 방지
-    reader = easyocr.Reader(["en", "ko"], gpu=False) 
+    # 💡 딥러닝 모델의 CPU/GPU 자원을 효율적으로 관리하도록 설정
+    reader = easyocr.Reader(["en", "ko"], gpu=torch.cuda.is_available())
     
     gc.collect()
     return df, vec, mat, reader
@@ -107,7 +107,7 @@ if "dur_msg" not in st.session_state:
     st.session_state.dur_msg = "대기 중..."
 
 # ----------------------------------------------------
-# [비전 이미지 처리 핵심 함수군]
+# [필규 조원님 알고리즘 100% 원본 유지 함수군]
 # ----------------------------------------------------
 def segment_pill_mask(img: np.ndarray) -> np.ndarray:
     h, w = img.shape[:2]
@@ -260,4 +260,182 @@ def search_pill_from_opencv(img: np.ndarray, pkl_db):
     top_4_indices = np.argsort(-final_scores)[:4]
     
     show_cols = [c for c in ["품목명", "색상앞", "성상", "분류명"] if c in df_db.columns]
-    candidates_df = df_
+    candidates_df = df_db.iloc[top_4_indices][show_cols].copy()
+    
+    candidates_df.insert(0, "순위", ["🥇 1위 (매칭)", "🥈 2위", "🥉 3위", "4위"])
+    candidates_df["정확도 점수"] = final_scores[top_4_indices].round(3)
+    
+    top_pill_name = df_db.iloc[top_4_indices[0]]["품목명"]
+    danger, msg = check_dur_danger(top_pill_name, pkl_db)
+    
+    st.session_state.top_candidates_df = candidates_df
+    st.session_state.last_result_name = top_pill_name
+    st.session_state.last_ocr = ocr_text
+    st.session_state.last_color = color
+    st.session_state.last_shape = shape
+    st.session_state.dur_danger = danger
+    st.session_state.dur_msg = msg
+    
+    if not danger:
+        if top_pill_name not in st.session_state.history_pills:
+            st.session_state.history_pills.append(top_pill_name)
+            
+    # 💡 [핵심 최적화 패치] 조원님 코드가 끝나는 순간 메모리 청소를 강제 집행합니다.
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()
+
+# 사이드바 설정
+st.sidebar.title("🧭 바로가기 메뉴")
+selected_page = st.sidebar.radio("이동할 페이지 선택:", ["💊 1페이지: 약물 병용금기 검색", "🍳 2페이지: AI 실시간 맞춤 레시피"])
+
+# ----------------------------------------------------
+# [DUR 데이터 로드 - 초경량 슬라이싱 로드]
+# ----------------------------------------------------
+@st.cache_data
+def load_dur_db():
+    temp_pkl_path = "temp_dur_db.pkl"
+    try:
+        if not os.path.exists(temp_pkl_path):
+            with requests.get(HUGGINGFACE_DUR_URL, stream=True, timeout=60) as r:
+                r.raise_for_status()
+                with open(temp_pkl_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=1024*1024):
+                        if chunk: f.write(chunk)
+        # 중요 데이터를 뽑아 메모리 절약
+        full_df = pd.read_pickle(temp_pkl_path)
+        opt_cols = [c for c in ['제품명A', '제품명B', '상세정보'] if c in full_df.columns]
+        return full_df[opt_cols].copy()
+    except Exception as e:
+        st.error(f"❌ 데이터 로드 실패: {e}")
+        if os.path.exists(temp_pkl_path): os.remove(temp_pkl_path)
+        return None
+    finally:
+        gc.collect()
+
+db = load_dur_db()
+
+# ====================================================
+# [PAGE 1] 약물 병용금기 검색 페이지
+# ====================================================
+if selected_page == "💊 1페이지: 약물 병용금기 검색":
+    st.title("💊 스마트 의약품 안전 조회 시스템")
+    tabs = st.tabs(["📷 브라우저 카메라 스캔", "🔍 텍스트 직접 검색"])
+    
+    with tabs[0]:
+        if df_db is None:
+            st.error("❌ 데이터베이스 빌드 실패 상태입니다.")
+        else:
+            st.subheader("📷 알약 스캔 촬영")
+            st.markdown("💡 **초록색 사각 가이드라인 박스 안에 알약이 들어오도록 맞춘 뒤 촬영해 주세요.**")
+            
+            # --- 초록색 가이드 박스 오버레이 CSS ---
+            st.markdown("""
+                <style>
+                    div[data-testid="stCameraInput"] {
+                        position: relative;
+                        border: 3px dashed #28a745 !important;
+                        border-radius: 8px;
+                        padding: 5px;
+                    }
+                    div[data-testid="stCameraInput"]::after {
+                        content: "💊 여기에 알약을 맞춰주세요";
+                        position: absolute;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        width: 200px;
+                        height: 200px;
+                        border: 4px solid #28a745;
+                        border-radius: 12px;
+                        box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.3);
+                        color: #28a745;
+                        font-weight: bold;
+                        text-align: center;
+                        line-height: 200px;
+                        font-size: 14px;
+                        pointer-events: none;
+                        z-index: 99;
+                    }
+                </style>
+            """, unsafe_allow_html=True)
+
+            img_file = st.camera_input("알약을 렌즈 가까이에 대고 캡처해 주세요")
+            
+            if img_file is not None:
+                file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
+                opencv_img = cv2.imdecode(file_bytes, 1)
+                
+                with st.spinner("🔍 이미지 분석 및 DUR 위험도를 계산 중입니다..."):
+                    search_pill_from_opencv(opencv_img, db)
+                
+                del file_bytes, opencv_img
+                gc.collect()
+            
+            if st.button("🔄 복용 스캔 목록 초기화", use_container_width=True):
+                st.session_state.history_pills = []
+                st.session_state.top_candidates_df = None
+                st.session_state.last_result_name = ""
+                st.session_state.last_ocr = ""
+                st.session_state.last_color = ""
+                st.session_state.last_shape = ""
+                st.session_state.dur_danger = False
+                st.session_state.dur_msg = "초기화되었습니다."
+                gc.collect()
+                st.rerun()
+            
+            if st.session_state.last_result_name:
+                st.success(f"🏆 분석 매칭 결론 1위: **{st.session_state.last_result_name}**")
+                st.info(f"🔍 [인식 텍스트]: {st.session_state.last_ocr if st.session_state.last_ocr else '인식 안됨'}")
+                st.info(f"🎨 [외형 정보]: 색상 [**{st.session_state.last_color}**] / 형태 [**{st.session_state.last_shape}**]")
+                if st.session_state.top_candidates_df is not None:
+                    st.dataframe(st.session_state.top_candidates_df, use_container_width=True, hide_index=True)
+                if st.session_state.dur_danger: 
+                    st.error(f"🚨 병용 금기: {st.session_state.dur_msg}")
+                else: 
+                    st.info(f"✅ 상호 복용 상태: {st.session_state.dur_msg}")
+                    
+            st.write("---")
+            st.markdown("### 🛒 현재까지 카메라로 누적 스캔된 약물 목록")
+            if st.session_state.history_pills:
+                st.dataframe(pd.DataFrame({"번호": range(1, len(st.session_state.history_pills)+1), "약물 품목명": st.session_state.history_pills}), use_container_width=True, hide_index=True)
+            else:
+                st.caption("카메라로 사진을 촬영하여 복용할 약들을 차례대로 추가해 주세요.")
+
+    with tabs[1]:
+        st.subheader("약물 직접 확인 및 대비 검사")
+        drug_A = st.text_input("첫 번째 약 이름 입력", placeholder="예: 타이레놀")
+        drug_B = st.text_input("두 번째 약 이름 입력", placeholder="예: 이부프로펜")
+        
+        if drug_A and drug_B:
+            if db is not None:
+                res = db[(db['제품명A'].str.contains(drug_A, na=False, case=False)) & (db['제품명B'].str.contains(drug_B, na=False, case=False))]
+                if not res.empty: 
+                    st.error(f"🚨 [위험] 두 약물은 함께 복용하면 안 되는 '병용금기' 품목입니다!")
+                    st.write(f"ℹ️ **금기 사유:** {res.iloc[0]['상세정보']}")
+                else: 
+                    st.success("✅ [안전] 국가 DUR 기준 두 약물 간의 병용금기 데이터가 없습니다.")
+            else:
+                st.error("❌ DUR 데이터가 로드되지 않았습니다.")
+
+# ====================================================
+# [PAGE 2] AI 실시간 맞춤 레시피 추천 페이지
+# ====================================================
+elif selected_page == "🍳 2페이지: AI 실시간 맞춤 레시피":
+    st.title("🍳 AI 실시간 의약품 정보 & 맞춤 레시피")
+    gemini_key = st.sidebar.text_input("🔑 Gemini API Key 입력 (필수)", type="password")
+    
+    if st.session_state.history_pills:
+        selected_pills = st.multiselect("대상 약물 선택:", options=st.session_state.history_pills, default=st.session_state.history_pills)
+        if selected_pills and gemini_key:
+            pills_string = ", ".join(selected_pills)
+            prompt = f"[{pills_string}] 복용 시 피해야 할 음식과 완벽히 배제된 안전한 건강 조리법(레시피)을 상세히 알려주세요."
+            with st.spinner("AI 분석 중..."):
+                try:
+                    genai.configure(api_key=gemini_key)
+                    model = genai.GenerativeModel('gemini-2.5-flash')
+                    st.markdown(model.generate_content(prompt).text)
+                except Exception as e: 
+                    st.error(f"오류 발생: {e}")
+    else:
+        st.warning("⚠️ 1페이지에서 카메라 스캔을 한 내역이 없습니다. 스캔을 먼저 진행해 주세요.")
