@@ -24,7 +24,7 @@ st.set_page_config(page_title="스마트 의약품 안전 조회 시스템", pag
 # ⚠️ [필수 수정] 허깅페이스에 올린 내 processed_db.pkl의 다운로드 주소를 넣어주세요!
 # ----------------------------------------------------
 # 본인의 Hugging Face 아이디(유저이름)를 아래 '내_허깅페이스_아이디' 자리에 넣으시면 됩니다.
-HUGGINGFACE_DUR_URL = "https://huggingface.co/datasets/jingjing52/dur-db/resolve/main/processed_db.pkl"
+HUGGINGFACE_DUR_URL = "https://huggingface.co/datasets/jingjing52/dur-db/resolve/main/processed_db.pkl?download=true"
 # ----------------------------------------------------
 # [텍스트 및 데이터 내부 정규화 함수]
 # ----------------------------------------------------
