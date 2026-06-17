@@ -1,0 +1,10 @@
+streamlit
+pandas
+numpy
+opencv-python-headless
+torch
+easyocr
+scikit-learn
+google-generativeai
+pillow
+gdown
