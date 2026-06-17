@@ -24,7 +24,6 @@ st.set_page_config(page_title="스마트 의약품 안전 조회 시스템", pag
 # ----------------------------------------------------
 # ⚠️ [필수 확인] 허깅페이스에 올린 내 processed_db.pkl의 다운로드 주소
 # ----------------------------------------------------
-# 본인의 Hugging Face 아이디(유저이름)가 정확히 들어가 있는지 확인하세요.
 HUGGINGFACE_DUR_URL = "https://huggingface.co/datasets/jingjing52/dur-db/resolve/main/processed_db.pkl"
 
 # ----------------------------------------------------
@@ -274,57 +273,28 @@ def search_pill_from_opencv(img: np.ndarray, pkl_db):
         if top_pill_name not in st.session_state.history_pills:
             st.session_state.history_pills.append(top_pill_name)
 
-def open_cv_camera_popup(pkl_db):
-    cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-    
-    while True:
-        ret, frame = cap.read()
-        if not ret: break
-        H, W = frame.shape[:2]
-        cx, cy = W // 2, H // 2
-        size = min(W, H) // 4
-        
-        cv2.rectangle(frame, (cx - size, cy - size), (cx + size, cy + size), (0, 255, 0), 2)
-        cv2.imshow("Pill Scanner (Press SPACE)", frame)
-        key = cv2.waitKey(1) & 0xFF
-        if key in (ord("q"), 27): break
-        elif key == ord(" "):
-            roi = frame[cy - size:cy + size, cx - size:cx + size]
-            search_pill_from_opencv(roi, pkl_db)
-            break
-    cap.release()
-    cv2.destroyAllWindows()
-
 # 사이드바 설정
 st.sidebar.title("🧭 바로가기 메뉴")
 selected_page = st.sidebar.radio("이동할 페이지 선택:", ["💊 1페이지: 약물 병용금기 검색", "🍳 2페이지: AI 실시간 맞춤 레시피"])
 
 # ----------------------------------------------------
-# 🌟 [DUR 데이터 로드 - requests 스트리밍 안전 패치 완료]
+# [DUR 데이터 로드 - requests 스트리밍 다운로드 안전 패치]
 # ----------------------------------------------------
 @st.cache_data
 def load_dur_db():
     with st.spinner("🚀 허깅페이스 클라우드에서 국가 DUR 데이터베이스를 분할 다운로드 중..."):
         temp_pkl_path = "temp_dur_db.pkl"
         try:
-            # 파일이 서버 환경에 아직 없으면 안전하게 스트리밍 다운로드 진행
             if not os.path.exists(temp_pkl_path):
                 with requests.get(HUGGINGFACE_DUR_URL, stream=True, timeout=60) as r:
                     r.raise_for_status()
                     with open(temp_pkl_path, 'wb') as f:
-                        # 1MB 버퍼 단위로 쪼개어 받아 전송 끊김(SSL EOF)을 근본적으로 차단
                         for chunk in r.iter_content(chunk_size=1024*1024):
                             if chunk:
                                 f.write(chunk)
-            
-            # 다운로드 완료된 로컬 가상 파일에서 데이터 복원
             return pd.read_pickle(temp_pkl_path)
-            
         except Exception as e:
             st.error(f"❌ 허깅페이스 데이터 로드 실패: {e}")
-            st.info("💡 허깅페이스 저장소 주소가 잘못되었거나 Public 설정이 되었는지 재확인 필요합니다.")
             if os.path.exists(temp_pkl_path):
                 os.remove(temp_pkl_path)
             return None
@@ -336,29 +306,39 @@ db = load_dur_db()
 # ====================================================
 if selected_page == "💊 1페이지: 약물 병용금기 검색":
     st.title("💊 스마트 의약품 안전 조회 시스템")
-    tabs = st.tabs(["📷 카메라 스캔", "🔍 텍스트 직접 검색"])
+    tabs = st.tabs(["📷 브라우저 카메라 스캔", "🔍 텍스트 직접 검색"])
     
     with tabs[0]:
         if df_db is None:
             st.error("❌ 저장소 내부 알약 데이터베이스 빌드 실패 상태입니다.")
         else:
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                if st.button("📷 실시간 카메라 판독 시작", type="primary", use_container_width=True):
-                    open_cv_camera_popup(db)
-                    st.rerun()
-            with col_btn2:
-                if st.button("🔄 복용 스캔 목록 초기화", use_container_width=True):
-                    st.session_state.history_pills = []
-                    st.session_state.top_candidates_df = None
-                    st.session_state.last_result_name = ""
-                    st.session_state.last_ocr = ""
-                    st.session_state.last_color = ""
-                    st.session_state.last_shape = ""
-                    st.session_state.dur_danger = False
-                    st.session_state.dur_msg = "초기화되었습니다."
-                    st.rerun()
+            st.subheader("📷 알약 스캔 촬영")
+            st.caption("아래의 카메라 화면에 알약이 잘 보이도록 위치한 후 [Take Photo]를 눌러 촬영해 주세요.")
             
+            # 💡 [서버 배포 치트키] 브라우저 내장 카메라 입력 컴포넌트 탑재
+            img_file = st.camera_input("알약을 렌즈 가까이에 대고 캡처해 주세요")
+            
+            if img_file is not None:
+                # 사용자가 사진을 찍으면 실행되는 감지 로직
+                file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
+                opencv_img = cv2.imdecode(file_bytes, 1)
+                
+                with st.spinner("🔍 이미지 분석 및 DUR 위험도를 계산 중입니다..."):
+                    search_pill_from_opencv(opencv_img, db)
+            
+            # 스캔 초기화 버튼 추가
+            if st.button("🔄 복용 스캔 목록 초기화", use_container_width=True):
+                st.session_state.history_pills = []
+                st.session_state.top_candidates_df = None
+                st.session_state.last_result_name = ""
+                st.session_state.last_ocr = ""
+                st.session_state.last_color = ""
+                st.session_state.last_shape = ""
+                st.session_state.dur_danger = False
+                st.session_state.dur_msg = "초기화되었습니다."
+                st.rerun()
+            
+            # 스캔 결과 출력부
             if st.session_state.last_result_name:
                 st.success(f"🏆 분석 매칭 결론 1위: **{st.session_state.last_result_name}**")
                 if st.session_state.top_candidates_df is not None:
@@ -373,7 +353,7 @@ if selected_page == "💊 1페이지: 약물 병용금기 검색":
             if st.session_state.history_pills:
                 st.dataframe(pd.DataFrame({"번호": range(1, len(st.session_state.history_pills)+1), "약물 품목명": st.session_state.history_pills}), use_container_width=True, hide_index=True)
             else:
-                st.caption("카메라 판독 단추를 눌러 복용할 약들을 차례대로 추가해 주세요.")
+                st.caption("카메라로 사진을 촬영하여 복용할 약들을 차례대로 추가해 주세요.")
 
     with tabs[1]:
         st.subheader("약물 직접 확인 및 대비 검사")
