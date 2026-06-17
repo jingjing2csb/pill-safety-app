@@ -13,6 +13,7 @@ import cv2
 import torch
 import easyocr
 import streamlit as st
+import requests  # 대용량 파일 분할 다운로드용 라이브러리
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import google.generativeai as genai
@@ -21,10 +22,11 @@ import google.generativeai as genai
 st.set_page_config(page_title="스마트 의약품 안전 조회 시스템", page_icon="💊", layout="centered")
 
 # ----------------------------------------------------
-# ⚠️ [필수 수정] 허깅페이스에 올린 내 processed_db.pkl의 다운로드 주소를 넣어주세요!
+# ⚠️ [필수 확인] 허깅페이스에 올린 내 processed_db.pkl의 다운로드 주소
 # ----------------------------------------------------
-# 본인의 Hugging Face 아이디(유저이름)를 아래 '내_허깅페이스_아이디' 자리에 넣으시면 됩니다.
-HUGGINGFACE_DUR_URL = "https://huggingface.co/datasets/jingjing52/dur-db/resolve/main/processed_db.pkl?download=true"
+# 본인의 Hugging Face 아이디(유저이름)가 정확히 들어가 있는지 확인하세요.
+HUGGINGFACE_DUR_URL = "https://huggingface.co/datasets/jingjing52/dur-db/resolve/main/processed_db.pkl"
+
 # ----------------------------------------------------
 # [텍스트 및 데이터 내부 정규화 함수]
 # ----------------------------------------------------
@@ -300,17 +302,31 @@ st.sidebar.title("🧭 바로가기 메뉴")
 selected_page = st.sidebar.radio("이동할 페이지 선택:", ["💊 1페이지: 약물 병용금기 검색", "🍳 2페이지: AI 실시간 맞춤 레시피"])
 
 # ----------------------------------------------------
-# 🌟 [DUR 데이터 로드 - 허깅페이스 실시간 스트리밍 패치]
+# 🌟 [DUR 데이터 로드 - requests 스트리밍 안전 패치 완료]
 # ----------------------------------------------------
 @st.cache_data
 def load_dur_db():
-    with st.spinner("🚀 허깅페이스 클라우드에서 국가 DUR 대용량 데이터베이스를 안전하게 가져오는 중..."):
+    with st.spinner("🚀 허깅페이스 클라우드에서 국가 DUR 데이터베이스를 분할 다운로드 중..."):
+        temp_pkl_path = "temp_dur_db.pkl"
         try:
-            # 허깅페이스 URL 주소에서 대용량 pkl 객체를 다운로드 없이 다이렉트로 복원
-            return pd.read_pickle(HUGGINGFACE_DUR_URL)
+            # 파일이 서버 환경에 아직 없으면 안전하게 스트리밍 다운로드 진행
+            if not os.path.exists(temp_pkl_path):
+                with requests.get(HUGGINGFACE_DUR_URL, stream=True, timeout=60) as r:
+                    r.raise_for_status()
+                    with open(temp_pkl_path, 'wb') as f:
+                        # 1MB 버퍼 단위로 쪼개어 받아 전송 끊김(SSL EOF)을 근본적으로 차단
+                        for chunk in r.iter_content(chunk_size=1024*1024):
+                            if chunk:
+                                f.write(chunk)
+            
+            # 다운로드 완료된 로컬 가상 파일에서 데이터 복원
+            return pd.read_pickle(temp_pkl_path)
+            
         except Exception as e:
             st.error(f"❌ 허깅페이스 데이터 로드 실패: {e}")
-            st.info("💡 HUGGINGFACE_DUR_URL 주소에 오타가 없거나 데이터셋이 Public 상태인지 확인해 주세요.")
+            st.info("💡 허깅페이스 저장소 주소가 잘못되었거나 Public 설정이 되었는지 재확인 필요합니다.")
+            if os.path.exists(temp_pkl_path):
+                os.remove(temp_pkl_path)
             return None
 
 db = load_dur_db()
