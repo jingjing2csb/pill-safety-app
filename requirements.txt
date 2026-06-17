@@ -6,5 +6,4 @@ torch
 easyocr
 scikit-learn
 google-generativeai
-pillow
-gdown
+requests
