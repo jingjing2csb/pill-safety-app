@@ -4,14 +4,14 @@ import sys
 import argparse
 import difflib
 import time
-import gc  # 💡 조원 코드를 살리기 위한 메모리 구원투수
+import gc
 from pathlib import Path
 from PIL import ImageFont, ImageDraw, Image
 
 import numpy as np
 import pandas as pd
 import cv2
-import torch  # 💡 조원님의 EasyOCR 구동을 위해 유지
+import torch 
 import easyocr
 import streamlit as st
 import requests
@@ -28,7 +28,7 @@ st.set_page_config(page_title="스마트 의약품 안전 조회 시스템", pag
 HUGGINGFACE_DUR_URL = "https://huggingface.co/datasets/jingjing52/dur-db/resolve/main/processed_db.pkl"
 
 # ----------------------------------------------------
-# [텍스트 및 데이터 내부 정규화 함수 - 조원님 원본 코드 복구]
+# [텍스트 및 데이터 내부 정규화 함수]
 # ----------------------------------------------------
 def norm_text(s: str) -> str:
     s = str(s).upper().strip()
@@ -43,7 +43,7 @@ def read_csv_safe(path: str) -> pd.DataFrame:
     raise RuntimeError(f"CSV를 읽을 수 없습니다: {path}")
 
 # ----------------------------------------------------
-# [알약 이미지 검색 엔진 구축 빌더 - 조원님 EasyOCR 로직 유지]
+# [알약 이미지 검색 엔진 구축 빌더]
 # ----------------------------------------------------
 @st.cache_resource
 def load_pill_engines():
@@ -78,7 +78,6 @@ def load_pill_engines():
     vec = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4), min_df=2)
     mat = vec.fit_transform(df["search_text"].tolist()).astype(np.float32)
     
-    # 💡 딥러닝 모델의 CPU/GPU 자원을 효율적으로 관리하도록 설정
     reader = easyocr.Reader(["en", "ko"], gpu=torch.cuda.is_available())
     
     gc.collect()
@@ -87,7 +86,7 @@ def load_pill_engines():
 df_db, tfidf_vec, tfidf_mat, ocr_reader = load_pill_engines()
 
 # ----------------------------------------------------
-# [세션 상태 설정] 데이터 유실 방지용 확실한 초기화
+# [세션 상태 설정]
 # ----------------------------------------------------
 if "history_pills" not in st.session_state:
     st.session_state.history_pills = []
@@ -214,7 +213,7 @@ def check_dur_danger(new_pill_name: str, pkl_db):
     for old_pill in st.session_state.history_pills:
         match = pkl_db[
             ((pkl_db['제품명A'].str.contains(old_pill, na=False, case=False)) & (pkl_db['제품명B'].str.contains(new_pill_name, na=False, case=False))) |
-            ((pkl_db['제품명A'].str.contains(new_pill_name, na=False, case=False)) & (pkl_db['제품명B'].str.contains(old_pill, na=False, case=False)))
+            ((pkl_df['제품명A'].str.contains(new_pill_name, na=False, case=False)) & (pkl_db['제품명B'].str.contains(old_pill, na=False, case=False)))
         ]
         if not match.empty:
             reason = match.iloc[0].get('상세정보', '병용 금기 약물 조합입니다.')
@@ -231,7 +230,7 @@ def search_pill_from_opencv(img: np.ndarray, pkl_db):
     q_vec       = tfidf_vec.transform([f"{ocr_text} {color} {shape}".strip()]).astype(np.float32)
     base_scores = cosine_similarity(q_vec, tfidf_mat).ravel()
 
-    ocr_score  = np.zeros(len(df_db), dtype=np.float32)
+    ocr_score = np.zeros(len(df_db), dtype=np.float32)
     ocr_joined = ocr_text.replace(" ", "")
     if ocr_joined:
         ocr_norm        = ocr_joined.translate(SIM_CHAR_MAP)
@@ -280,7 +279,6 @@ def search_pill_from_opencv(img: np.ndarray, pkl_db):
         if top_pill_name not in st.session_state.history_pills:
             st.session_state.history_pills.append(top_pill_name)
             
-    # 💡 [핵심 최적화 패치] 조원님 코드가 끝나는 순간 메모리 청소를 강제 집행합니다.
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     gc.collect()
@@ -290,7 +288,7 @@ st.sidebar.title("🧭 바로가기 메뉴")
 selected_page = st.sidebar.radio("이동할 페이지 선택:", ["💊 1페이지: 약물 병용금기 검색", "🍳 2페이지: AI 실시간 맞춤 레시피"])
 
 # ----------------------------------------------------
-# [DUR 데이터 로드 - 초경량 슬라이싱 로드]
+# [DUR 데이터 로드]
 # ----------------------------------------------------
 @st.cache_data
 def load_dur_db():
@@ -302,7 +300,6 @@ def load_dur_db():
                 with open(temp_pkl_path, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=1024*1024):
                         if chunk: f.write(chunk)
-        # 중요 데이터를 뽑아 메모리 절약
         full_df = pd.read_pickle(temp_pkl_path)
         opt_cols = [c for c in ['제품명A', '제품명B', '상세정보'] if c in full_df.columns]
         return full_df[opt_cols].copy()
@@ -327,40 +324,11 @@ if selected_page == "💊 1페이지: 약물 병용금기 검색":
             st.error("❌ 데이터베이스 빌드 실패 상태입니다.")
         else:
             st.subheader("📷 알약 스캔 촬영")
-            st.markdown("💡 **초록색 사각 가이드라인 박스 안에 알약이 들어오도록 맞춘 뒤 촬영해 주세요.**")
+            st.markdown("💡 **카메라 렌즈 가까이에 알약을 대고 선명하게 캡처해 주세요.**")
             
-            # --- 초록색 가이드 박스 오버레이 CSS ---
-            st.markdown("""
-                <style>
-                    div[data-testid="stCameraInput"] {
-                        position: relative;
-                        border: 3px dashed #28a745 !important;
-                        border-radius: 8px;
-                        padding: 5px;
-                    }
-                    div[data-testid="stCameraInput"]::after {
-                        content: "💊 여기에 알약을 맞춰주세요";
-                        position: absolute;
-                        top: 50%;
-                        left: 50%;
-                        transform: translate(-50%, -50%);
-                        width: 200px;
-                        height: 200px;
-                        border: 4px solid #28a745;
-                        border-radius: 12px;
-                        box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.3);
-                        color: #28a745;
-                        font-weight: bold;
-                        text-align: center;
-                        line-height: 200px;
-                        font-size: 14px;
-                        pointer-events: none;
-                        z-index: 99;
-                    }
-                </style>
-            """, unsafe_allow_html=True)
+            # 💡 [조치 완료] 무겁던 CSS 초록 가이드 박스 로직 전면 삭제
 
-            img_file = st.camera_input("알약을 렌즈 가까이에 대고 캡처해 주세요")
+            img_file = st.camera_input("알약을 캡처해 주세요")
             
             if img_file is not None:
                 file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
