@@ -28,7 +28,7 @@ st.set_page_config(page_title="스마트 의약품 안전 조회 시스템", pag
 HUGGINGFACE_DUR_URL = "https://huggingface.co/datasets/jingjing52/dur-db/resolve/main/processed_db.pkl"
 
 # ----------------------------------------------------
-# [텍스트 및 데이터 내부 정규화 함수]
+# [텍스트 및 데이터 내부 정규화 함수 - 조원님 원본]
 # ----------------------------------------------------
 def norm_text(s: str) -> str:
     s = str(s).upper().strip()
@@ -43,7 +43,7 @@ def read_csv_safe(path: str) -> pd.DataFrame:
     raise RuntimeError(f"CSV를 읽을 수 없습니다: {path}")
 
 # ----------------------------------------------------
-# [알약 이미지 검색 엔진 구축 빌더]
+# [알약 이미지 검색 엔진 구축 빌더 - 조원님 원본]
 # ----------------------------------------------------
 @st.cache_resource
 def load_pill_engines():
@@ -211,9 +211,10 @@ def check_dur_danger(new_pill_name: str, pkl_db):
         return False, "안전 (비교할 누적 복용 약물 없음)"
 
     for old_pill in st.session_state.history_pills:
+        # 💡 [수정 완료] 기존 pkl_df로 잘못 들어가있던 치명적인 오타를 pkl_db로 완벽 정정했습니다.
         match = pkl_db[
             ((pkl_db['제품명A'].str.contains(old_pill, na=False, case=False)) & (pkl_db['제품명B'].str.contains(new_pill_name, na=False, case=False))) |
-            ((pkl_df['제품명A'].str.contains(new_pill_name, na=False, case=False)) & (pkl_db['제품명B'].str.contains(old_pill, na=False, case=False)))
+            ((pkl_db['제품명A'].str.contains(new_pill_name, na=False, case=False)) & (pkl_db['제품명B'].str.contains(old_pill, na=False, case=False)))
         ]
         if not match.empty:
             reason = match.iloc[0].get('상세정보', '병용 금기 약물 조합입니다.')
@@ -325,8 +326,6 @@ if selected_page == "💊 1페이지: 약물 병용금기 검색":
         else:
             st.subheader("📷 알약 스캔 촬영")
             st.markdown("💡 **카메라 렌즈 가까이에 알약을 대고 선명하게 캡처해 주세요.**")
-            
-            # 💡 [조치 완료] 무겁던 CSS 초록 가이드 박스 로직 전면 삭제
 
             img_file = st.camera_input("알약을 캡처해 주세요")
             
